@@ -1,0 +1,139 @@
+CREATE TABLE PRODUCT_GROUP(code NUMBER NOT NULL PRIMARY KEY, name char(255), count number, sum_price float, margin float);
+
+CREATE TABLE PRODUCT(code NUMBER NOT NULL PRIMARY KEY, name char(255), group_code number, incoming_price float, retail_price float, count number default 0);
+
+ALTER TABLE PRODUCT ADD CONSTRAINT FK_PRODUCT_GROUP_CODE FOREIGN KEY (GROUP_CODE) REFERENCES PRODUCT_GROUP(CODE);
+
+CREATE SEQUENCE product_code_seq
+  START WITH 1
+  INCREMENT BY 1
+  NOCACHE
+  NOCYCLE;
+
+INSERT INTO product (code, name, group_code, incoming_price, retail_price, count)
+VALUES (product_code_seq.NEXTVAL, 'Philips телевизор', 1, 10000,12000,5);
+
+-- Второе задание
+create or replace trigger insert_new_product_trigger
+  for insert on product
+  compound trigger
+    margin number;
+    
+  before each row is
+  begin
+    select margin into margin from product_group pg where pg.code = :new.group_code;
+    :new.retail_price := :new.incoming_price * (1 + (margin));
+  end before each row;
+end insert_new_product_trigger;
+
+
+INSERT INTO product (code, name, group_code, incoming_price, count)
+VALUES (product_code_seq.NEXTVAL, 'Philips телевизор 3', 1, 4000,5);
+
+--Третье задание
+create or replace trigger update_product_count_trigger
+  for update of count on product
+  compound trigger
+    
+    before each row is
+    begin
+        --если количество уменьшилось
+        if :new.count < :old.count then
+          update product_group
+             set product_group.sum_price = product_group.sum_price - (:new.retail_price * (:old.count - :new.count)),
+             product_group.count = product_group.count - (:old.count - :new.count)
+           where product_group.code = :new.group_code;
+        else 
+        -- увеличиваем количество, добавляем к сводной розничной стоимости новую сумму
+            update product_group
+             set product_group.sum_price = product_group.sum_price + (:new.retail_price * (:new.count - :old.count)), 
+             product_group.count =  product_group.count + (:new.count - :old.count)
+           where product_group.code = :new.group_code;
+        end if;
+    end before each row;
+end update_product_count_trigger;
+
+--Четвертое задание
+create or replace trigger update_product_group_margin_trigger
+  for update of margin on product_group
+  compound trigger
+    
+    after each row is
+    begin
+        for product_with_updated_margin in (select * from product where product.group_code = :new.code)
+        loop 
+            begin
+                 update product
+                    set product.retail_price = product.incoming_price * (1 + (:new.margin))
+                    where product.code = product_with_updated_margin.code;
+            end;
+        end loop;
+    end after each row;
+end update_product_group_margin_trigger;
+
+--Шестое задание
+create or replace trigger update_product_retail_price_trigger
+  for update of retail_price on product
+  compound trigger
+    
+    before each row is
+    begin
+        --если количество уменьшилось
+        if :new.retail_price < :old.retail_price then
+          update product_group
+             set product_group.sum_price = product_group.sum_price - (:new.count * (:old.retail_price - :new.retail_price))
+           where product_group.code = :new.group_code;
+        else 
+        -- увеличиваем количество, добавляем к сводной розничной стоимости новую сумму
+            update product_group
+             set product_group.sum_price = product_group.sum_price + (:new.count * (:new.retail_price - :old.retail_price))
+           where product_group.code = :new.group_code;
+        end if;
+    end before each row;
+end update_product_retail_price_trigger;
+
+
+
+
+CREATE USER Lab3 IDENTIFIED BY 1444 DEFAULT TABLESPACE USERS;
+
+GRANT CREATE SESSION TO Lab3
+/
+GRANT CREATE TABLE TO Lab3
+/
+GRANT CREATE PROCEDURE TO Lab3
+/
+GRANT CREATE TRIGGER TO Lab3
+/
+GRANT CREATE VIEW TO Lab3
+/
+GRANT CREATE SEQUENCE TO Lab3
+/
+GRANT CREATE VIEW TO Lab3
+/
+
+GRANT DELETE ANY TABLE TO Lab3
+/
+GRANT DROP ANY TABLE TO Lab3
+/
+GRANT DROP ANY PROCEDURE TO Lab3
+/
+GRANT DROP ANY TRIGGER TO Lab3
+/
+GRANT DROP ANY VIEW TO Lab3
+/
+
+GRANT ALTER ANY TABLE TO Lab3
+/
+GRANT ALTER ANY TABLE TO Lab3
+/
+GRANT ALTER ANY PROCEDURE TO Lab3
+/
+GRANT ALTER ANY TRIGGER TO Lab3
+/
+
+COMMIT
+/
+
+ALTER USER Lab3 QUOTA UNLIMITED ON USERS;
+
