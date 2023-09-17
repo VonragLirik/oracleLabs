@@ -1,0 +1,123 @@
+1. Написать процедуру перевода студента в другую группу:
+процедура_перевода (код_студента, новая_группа). Процедура должна проверять, чтобы группы были одинакового курса, иначе выводить ошибку.
+2. Написать процедуру перевода всех студентов на следующий курс. При каждом вызове курс группы увеличивается на единицу. Для студентов 5-го курса наименование группы становится пустым.
+3. Написать процедуру выводящую на экран фамилии задолжников в данной группе, имеющих количество двоек больше заданного. Процедура (группа, количество_двоек).
+
+CREATE OR REPLACE PROCEDURE transfer_student_to_group_procedure(student_id IN NUMBER, group_id IN NUMBER) IS BEGIN
+    -- определяем текущий номер курса
+    DECLARE CURSOR current_group_course_cursor IS select * from student left join group_name ON student.group_name_id = group_name.id where student.id = student_id;
+    current_group_course current_group_course_cursor%ROWTYPE;
+    BEGIN  
+        OPEN current_group_course_cursor;
+        FETCH current_group_course_cursor INTO current_group_course;
+        IF current_group_course_cursor%NOTFOUND THEN raise_application_error(-20100, 'Группа студента не найдена'); END IF;
+        CLOSE current_group_course_cursor;
+        
+        -- определяем курс новой группы
+        DECLARE CURSOR new_group_course_cursor IS select * from group_name where group_name.id = group_id;
+        new_group_course new_group_course_cursor%ROWTYPE;
+        BEGIN
+            OPEN new_group_course_cursor;
+            FETCH new_group_course_cursor INTO new_group_course;
+            IF new_group_course_cursor%NOTFOUND THEN raise_application_error(-20100, 'Новая группа не найдена'); END IF;
+            CLOSE new_group_course_cursor;
+            
+            IF current_group_course.course = new_group_course.course THEN BEGIN
+                UPDATE student
+                SET student.group_name_id = group_id
+                WHERE student.id = student_id;
+                DBMS_OUTPUT.PUT_LINE('Студент переведен в новую группу');
+            END;
+            ELSE raise_application_error(-20100, 'Группы должны быть одного курса');
+            END IF;
+        END;
+    END;
+END transfer_student_to_group_procedure;
+
+
+BEGIN  transfer_student_to_group_procedure(1, 3); END;
+
+select * from student;
+---------------------------------------------------------------------------------------------
+create or replace PROCEDURE update_course_procedure IS
+    CURSOR groups_name_cursor IS SELECT * FROM group_name;
+    BEGIN
+        FOR group_name_rows IN groups_name_cursor LOOP
+            IF (group_name_rows.course + 1) < 5 and group_name_rows.course > 0 THEN
+                update group_name
+                set group_name.course = group_name.course + 1
+                where group_name.id = group_name_rows.id;
+            ELSE
+                update group_name
+                set group_name.course = NULL
+                where group_name.id = group_name_rows.id;
+                END IF;
+        END LOOP;
+        -- выводим ошибку, но цикл продолжает работать
+    EXCEPTION
+    WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('Возникла ошибка' || SQLERRM);
+END;
+
+BEGIN 
+--select * from group_name; 
+update_course_procedure(); 
+--select * from group_name;
+END;
+---------------------------------------------------------------------------------------------
+create or replace PROCEDURE find_debtors_procedure(
+    group_id NUMBER,
+    count_twos integer
+) AS BEGIN
+    FOR student_rows IN (SELECT * FROM student WHERE student.group_name_id = group_id)
+    LOOP
+        DECLARE count_student_twos NUMBER;
+        BEGIN
+            SELECT COUNT(*)
+            INTO count_student_twos
+            FROM journal j
+            WHERE j.student_id = student_rows.id AND (j.score = 2 OR j.score = 1);
+
+            IF count_student_twos > count_twos THEN
+                DBMS_OUTPUT.PUT_LINE('Фамилия задолжника ' || student_rows.second_name);
+                DBMS_OUTPUT.PUT_LINE('Количество двоек = ' || count_student_twos);
+            ELSE DBMS_OUTPUT.PUT_LINE('Фамилия студента ' || student_rows.second_name || 'Количество двоек ' || count_student_twos);
+            END IF;
+        END;
+    END LOOP;
+END;
+
+BEGIN find_debtors_procedure(1, 0); 
+END;
+---------------------------------------------------------------------------------------------
+create or replace PROCEDURE count_debtors_procedure(
+    group_id NUMBER,
+    count_twos integer,
+    count_debtors out integer
+) AS BEGIN
+    count_debtors := 0;
+    FOR student_rows IN (SELECT * FROM student WHERE student.group_name_id = group_id)
+    LOOP
+        DECLARE count_student_twos NUMBER;
+        BEGIN
+            SELECT COUNT(*)
+            INTO count_student_twos
+            FROM journal j
+            WHERE j.student_id = student_rows.id AND (j.score = 2 OR j.score = 1);
+
+            DBMS_OUTPUT.PUT_LINE('Фамилия ' || student_rows.second_name || ', Количество двоек ' || count_student_twos);
+            IF count_student_twos > count_twos THEN
+                count_debtors := count_debtors + 1;
+                DBMS_OUTPUT.PUT_LINE('Фамилия задолжника ' || student_rows.second_name);
+                DBMS_OUTPUT.PUT_LINE('Количество двоек = ' || count_student_twos);
+            END IF;
+        END;
+    END LOOP;
+    
+    DBMS_OUTPUT.PUT_LINE('count_debtors ' || count_debtors);
+    IF count_debtors = 0 THEN DBMS_OUTPUT.PUT_LINE('Задолжники не найдены'); END IF;
+END;
+
+DECLARE count_debtors integer := 0;
+BEGIN count_debtors_procedure(1, 0, count_debtors); 
+DBMS_OUTPUT.PUT_LINE('Фамилия задолжника ' || count_debtors);
+END;
