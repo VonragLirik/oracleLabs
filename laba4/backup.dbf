@@ -1,0 +1,79 @@
+--1.	Написать триггер, обрабатывающий каскадное удаление строк из таблицы «Группы товаров». Если существуют позиции в таблице «Товары», группа которых совпадает с удаляемой, то сначала удалить позиции из таблицы «Товары».
+
+create or replace trigger cascade_delete_product_group before delete on product_group for each row
+    declare pragma autonomous_transaction;
+        begin
+        execute IMMEDIATE 'alter trigger update_product_group_margin_trigger disable';
+        commit;
+        
+        --удаляем сначала продукты с этой группой
+        for product_cascade_deleted in (select * from product where product.group_code = :old.code)
+        loop 
+            begin
+            delete from product where product.code = product_cascade_deleted.code;
+            end;
+        end loop;
+       
+        execute IMMEDIATE 'alter trigger update_product_group_margin_trigger enable';
+        commit;
+end cascade_delete_product_group;
+
+--2. Написать вьюшку
+CREATE OR REPLACE VIEW product_view AS SELECT p.code as product_code, p.name as product_name, pg.name as group_name, p.incoming_price, p.count from product p 
+	left join product_group pg ON pg.code = p.group_code WITH CHECK OPTION;
+
+
+
+--3. С помощью триггеров INSTEAD OF переопределить корректное выполнение операций добавление/удаление/изменение для представления «Товары-представление» (операции должны применяться к таблице «Товары», при этом все триггеры из 3-й лабораторной работы должны работать, т.е. должен происходить расчет вычисляемых полей и интегральных показателей). При неправильном вводе имени группы должно генерироваться соответствующее пользовательское исключение.
+create or replace procedure check_group_name(group_name char) is not_correct_name_exception exception;
+    count_group_name number;
+    begin
+    select count(*) into count_group_name from product_group where product_group.name = group_name;
+    if(count_group_name = 0) then raise not_correct_name_exception; end if;
+    exception when not_correct_name_exception then raise_application_error(-20001, 'Имени такой группы не существует');
+end;
+
+
+create or replace trigger smart_update_view instead of insert or update or delete on product_view for each row
+        declare product_group_code number;
+        
+        begin
+        case
+            when deleting then begin 
+                DBMS_OUTPUT.PUT_LINE('Успешно удалено');
+                delete from product where product.code = :old.product_code;           
+            end;
+            when updating then begin 
+                if updating('group_name') then begin 
+                    check_group_name(:new.group_name); 
+                    select product_group.code into product_group_code from product_group where product_group.name = :new.group_name;
+                    update product set product.group_code = product_group_code where product.code = :new.product_code;
+                end;
+                end if;
+                if updating('product_name') then 
+                    update product set product.name = :new.product_name where product.code = :new.product_code; end if;
+                if updating('incoming_price') and :new.incoming_price > 0 then 
+                    update product set product.incoming_price = :new.incoming_price where product.code = :new.product_code; end if;
+                if updating('count') and :new.count > -1 then 
+                    update product set product.count = :new.count where product.code = :new.product_code; end if;
+            end;
+
+            when inserting then begin 
+                if :new.incoming_price > 0 and :new.count > -1 then begin
+                    check_group_name(:new.group_name);
+                    select product_group.code into product_group_code from product_group where product_group.name = :new.group_name;
+                    INSERT INTO product (code, name, group_code, incoming_price, count)
+                        VALUES (product_code_seq.NEXTVAL, :new.product_name, product_group_code, :new.incoming_price, :new.count); 
+                    exception when NO_DATA_FOUND then DBMS_OUTPUT.PUT_LINE('Группа не найдена');
+                end;
+                end if;
+            end;
+        end case;
+end smart_update_view;
+
+
+INSERT INTO product (code, name, group_code, incoming_price, count)
+                    VALUES (product_code_seq.NEXTVAL, 'test', 1, 12333, 2); 
+
+                INSERT INTO product_view (product_name, group_name, incoming_price, count)
+                    VALUES ('test2', 'холодильнии', 122333, 2); 

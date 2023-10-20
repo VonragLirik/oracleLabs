@@ -95,6 +95,85 @@ end update_product_retail_price_trigger;
 
 
 
+
+-- Составные триггеры
+create or replace trigger update_product_group_margin_trigger
+  for update of margin on product_group
+  compound trigger
+    updated_group_code number;
+    new_margin float;
+
+    before each row is
+        begin
+               updated_group_code := :new.code;
+               new_margin := :new.margin;
+    end before each row;
+
+    after statement is
+         begin
+        for product_with_updated_margin in (select * from product where product.group_code = updated_group_code)
+        loop 
+            begin
+                 update product
+                    set product.retail_price = product.incoming_price * (1 + (new_margin))
+                    where product.code = product_with_updated_margin.code;
+            end;
+        end loop;
+    end after statement;
+end update_product_group_margin_trigger;
+
+
+
+
+
+create or replace trigger update_product_retail_price_trigger
+  for update of retail_price on product
+  compound trigger
+    updated_group_code number;
+    delta_retail_price float;
+
+    before each row is
+        begin
+               updated_group_code := :new.group_code;
+               delta_retail_price := :new.count * (:new.retail_price - :old.retail_price);
+    end before each row;
+
+    after statement is
+        begin
+            update product_group
+                 set product_group.sum_price = product_group.sum_price + delta_retail_price
+               where product_group.code = updated_group_code;
+    end after statement;
+end update_product_retail_price_trigger;
+
+
+
+
+-- второе задание
+create or replace trigger insert_new_product_trigger
+  before insert on product for each row
+  declare margin number;
+  begin
+    select margin into margin from product_group pg where pg.code = :new.group_code;
+    :new.retail_price := :new.incoming_price * (1 + (margin));
+end insert_new_product_trigger;
+
+
+--третье задание
+create or replace trigger update_product_count_trigger
+  before update on product
+    for each row begin
+    if updating('count') then
+          update product_group
+             set product_group.sum_price = product_group.sum_price + (:new.retail_price * (:new.count - :old.count)),
+             product_group.count = product_group.count + (:new.count - :old.count)
+           where product_group.code = :new.group_code;
+    end if;
+end update_product_count_trigger;
+
+
+
+
 CREATE USER Lab3 IDENTIFIED BY 1444 DEFAULT TABLESPACE USERS;
 
 GRANT CREATE SESSION TO Lab3
@@ -137,3 +216,30 @@ COMMIT
 
 ALTER USER Lab3 QUOTA UNLIMITED ON USERS;
 
+
+CREATE ROLE Test_role;
+
+GRANT SELECT ON lab3.product TO Test_role;
+
+CREATE USER user_with_test_role IDENTIFIED BY 1 DEFAULT TABLESPACE USERS;
+
+GRANT Test_role to user_with_test_role;
+
+GRANT CREATE SESSION TO Test_role;
+
+GRANT ROLE
+INSERT INTO lab3.product (
+    code,
+    name,
+    group_code,
+    incoming_price,
+    retail_price,
+    count
+) VALUES (
+    60,
+    'test insert',
+    1,
+    11,
+    123,
+    5
+);
