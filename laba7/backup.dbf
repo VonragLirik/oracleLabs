@@ -1,0 +1,43 @@
+echo $ORACLE_SID
+set ORACLE_SID=orcl
+
+sqlplus /nolog
+conn sys/sys as sysdba
+select * from system.very_security; 
+SHUTDOWN abort;
+
+sqlplus /nolog
+conn sys/sys as sysdba
+STARTUP NOMOUNT; 
+select * from system.very_security;
+SHUTDOWN normal;
+
+STARTUP NOMOUNT; 
+alter database mount;
+select * from system.very_security;
+SHUTDOWN normal;
+
+startup mount;
+ALTER DATABASE OPEN;
+select * from system.very_security;
+SHUTDOWN normal;
+
+startup open;
+CREATE DIRECTORY exportDB AS 'C:\Oracle\export'
+exit
+-- + создаем папку 
+expdp system/1 full=Y directory=exportDB dumpfile=full_dump.dmp logfile=full_dump.log
+
+expdp system/1 schemas=system directory=exportDB dumpfile=lab7_dump.dmp logfile=lab7_dump.log;
+
+--export table
+expdp system/1 tables=system.very_security directory=exportDB dumpfile=lab7_dump_export.dmp logfile=lab7_dump_export.log; 
+
+CREATE USER C##user_lab_7 IDENTIFIED BY "1";  
+GRANT DBA TO C##user_lab_7;
+
+-- import table very_security в import_very_security
+impdp system/1 directory=ExportDB dumpfile=LAB7_DUMP_EXPORT.DMP logfile=lab7_log_import.log remap_schema=SYSTEM:C##user_lab_7 REMAP_TABLE=very_security:import_very_security;
+
+-- import schema very_security в import_very_security
+impdp system/1 directory=ExportDB dumpfile=LAB7_DUMP_EXPORT.DMP logfile=lab7_log_import.log remap_schema=SYSTEM:C##user_lab_7;
